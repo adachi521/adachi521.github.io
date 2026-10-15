@@ -1,0 +1,79 @@
+# GitHub Pages 部署（Astro / Shirone 主题）
+#
+# 本仓库自带内容（src/content/posts），content:sync 走 local 模式的空操作，
+# 因此**不要**设置 CONTENT_DIR / CONTENT_REPO_URL —— 一旦设置会被判定为
+# external 模式，转而去找一个不存在的内容仓。
+#
+# 启用方式：
+#   1. 保存为 .github/workflows/deploy.yml
+#   2. 仓库 Settings → Pages → Build and deployment → Source 选 "GitHub Actions"
+#   3. push 到 main，或到 Actions 页手动 Run workflow
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一时间只允许一个部署；新的推送取消旧的进行中部署。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # 不传 version：仓库 .npmrc 里 manage-package-manager-versions = true，
+        # pnpm 会按 package.json 的 packageManager 字段（pnpm@11.28.2）自取版本。
+        # 硬编码 version 会覆盖它，导致锁文件与 pnpm 版本不匹配。
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build site
+        # package.json 的 build 链路已是完整流程：
+        #   content:sync → astro build → pagefind --site dist → fonts:check
+        # 不需要再单独跑 content:sync。
+        run: pnpm build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
